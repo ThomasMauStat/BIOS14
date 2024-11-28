@@ -1,0 +1,196 @@
+# Exercise on bee distribution
+dat = read.csv("data/Eulaema.csv", fileEncoding = "latin1")
+head(dat)
+dat$mcMAP = dat$MAP - mean(dat$MAP, na.rm=T)
+dat$mcMAP
+
+#install.packages("gt")      # For table creation
+#install.packages("broom")   # To tidy up model summaries
+#install.packages("glmmTMB")
+
+library(gt)
+library(broom)
+library(MASS)
+library(psych)
+library(glmmTMB)
+
+# Make histograms to visualise the distribution of the data
+par(mfrow=c(3,3))
+hist(dat$Eulaema_nigrita)
+hist(dat$forest.)
+hist(dat$altitude)
+hist(dat$MAT)
+hist(dat$MAP) 
+hist(dat$Tseason)
+hist(dat$Pseason) 
+hist(dat$lu_het)
+hist(dat$mcMAP)
+
+par(mfrow=c(1,1))
+# Investigate data and check for correlation
+# Make a general linear model with all variables and gradually take out variables that show no significant influence on bee abundance
+
+pairs.panels(dat)
+
+m1 = glm.nb(Eulaema_nigrita ~ mcMAP + forest. + effort + altitude + MAT + MAP + Tseason + Pseason + lu_het, data = dat)
+summary(m1)
+1- m1$deviance/m1$null.deviance
+
+# Create a tidy data frame from the model summary
+summary_data <- tidy(m1) # Extracts coefficients and statistics
+summary_data <- summary_data %>%
+  dplyr::rename("Predictor" = "term",
+                "Estimate" = "estimate",
+                "Std. Error" = "std.error",
+                "z value" = "statistic",
+                "Pr(>|z|)" = "p.value")
+
+# Create a nicely formatted table using gt
+model_table <- summary_data %>%
+  gt() %>%
+  tab_header(
+    title = "Model Summary for m1"
+  ) %>%
+  fmt_number(
+    columns = c("Estimate", "Std. Error", "z value", "Pr(>|z|)"),
+    decimals = 3
+  )
+
+# View the table in RStudio's Viewer
+print(model_table)
+
+# remove MAP, lu_het and altitude
+m2 = glm.nb(Eulaema_nigrita ~ mcMAP + forest. + effort + MAT + Tseason + Pseason, data = dat)
+summary(m2)
+1- m2$deviance/m2$null.deviance
+
+# remove MAT
+m3 = glm.nb(Eulaema_nigrita ~ mcMAP + forest. + effort + Tseason + Pseason, data = dat)
+summary(m3)
+1- m3$deviance/m3$null.deviance
+
+# Focus on the graphical visualisation of the dependence of local abundance of Eulaema nigrita on forest cover, simultaneously accounting for variation in yearly rainfall. Fit a GLM with negative binomial error distribution and a log link function.
+m4 = glm.nb(Eulaema_nigrita ~ mcMAP + forest., data = dat)
+summary(m4)
+1- m4$deviance/m4$null.deviance
+
+# Create a tidy data frame from the model summary
+summary_data <- tidy(m4) # Extracts coefficients and statistics
+summary_data <- summary_data %>%
+  dplyr::rename("Predictor" = "term",
+                "Estimate" = "estimate",
+                "Std. Error" = "std.error",
+                "z value" = "statistic",
+                "Pr(>|z|)" = "p.value")
+
+# Create a nicely formatted table using gt
+model_table <- summary_data %>%
+  gt() %>%
+  tab_header(
+    title = "Model Summary for m4"
+  ) %>%
+  fmt_number(
+    columns = c("Estimate", "Std. Error", "z value", "Pr(>|z|)"),
+    decimals = 3
+  )
+
+# View the table in RStudio's Viewer
+print(model_table)
+
+# Extract deviance-based R2
+pseudo_r2_deviance <- 1 - (m4$deviance / m4$null.deviance)
+
+# Print results
+pseudo_r2_deviance
+
+# back transform the values obtained for better interpretation
+coefs = summary(m4)$coef
+exp(coefs[1,1])
+# predicted number of bees in a fully forested landscape by simply adding the forest-cover parameter estimate to the intercept
+exp(coefs[1,1] + coefs[3,1])
+
+
+# Making predictions from multiple-regression models
+plot(dat$forest., dat$Eulaema_nigrita, col="grey", las=1,       #Plotting observed data
+     xlab="Forest cover", ylab="Abundance of Eulaema nigrita")
+
+# Generating new forest cover values
+newforest = seq(min(dat$forest.), max(dat$forest.), length.out=200)
+
+# Next step is to define a function to predict and plot for different mcMAP values
+# Predict and plot for mean, mean + SD, and mean - SD of mcMAP
+
+newMAP = rep(mean(dat$mcMAP), length(newforest))
+y_hat = predict(m4, newdata=list(mcMAP=newMAP,
+                                 forest.=newforest),
+                type="response")
+lines(newforest, y_hat, lwd=2, col="black")
+newMAP2 = rep(mean(dat$mcMAP)+sd(dat$mcMAP), length(newforest))
+y_hat2 = predict(m4, newdata=list(mcMAP=newMAP2,
+                                  forest.=newforest),
+                 type="response")
+newMAP3 = rep(mean(dat$mcMAP)-sd(dat$mcMAP), length(newforest))
+y_hat3 = predict(m4, newdata=list(mcMAP=newMAP3,
+                                  forest.=newforest),
+                 type="response")
+lines(newforest, y_hat2, lwd=2, col="green")
+lines(newforest, y_hat3, lwd=2, col="darkgreen")
+
+# Add legends
+legend("topright", lty=1, lwd=2, col=c(1, "green", "darkgreen"), bty="n",
+       legend=c("MAP = Mean",
+                "MAP = Mean + SD",
+                "MAP = Mean - SD"))
+                
+#Add reference lines
+abline(h=exp(coefs[1,1]), lty=2)
+abline(h=exp(coefs[1,1] + coefs[3,1]), lty=2)
+
+
+# Ensure 'method' is a factor
+dat$method <- as.factor(dat$method)
+
+# Fit the model using forest cover and method
+m2 <- glmmTMB(Eulaema_nigrita ~ forest. + (1 | method), family = "nbinom2", data = dat)
+
+# Generate new forest cover values for predictions
+newForest <- seq(min(dat$forest., na.rm = TRUE), max(dat$forest., na.rm = TRUE), length.out = 200)
+
+# Plot observed data with forest cover
+plot(dat$forest., dat$Eulaema_nigrita, col = "grey", las = 1,
+     xlab = "Forest Cover", ylab = "Abundance of Eulaema nigrita",
+     main = "Predictions by Method (Forest Cover)")
+
+# Define colors for each method
+method_colors <- rainbow(length(levels(dat$method)))
+
+# Loop through each method for predictions and plot
+for (i in seq_along(levels(dat$method))) {
+  method_name <- levels(dat$method)[i]
+  
+  # Generate new data for predictions
+  newdata <- data.frame(forest. = newForest, method = factor(method_name, levels = levels(dat$method)))
+  
+  # Predict the fitted values (fixed + random effects)
+  y_hat <- predict(m2, newdata = newdata, re.form = NULL)  # Include fixed + random effects
+  
+  # Add the fitted line for the current method
+  lines(newForest, exp(y_hat), col = method_colors[i], lwd = 2)
+}
+
+# Compute and plot the population-level fit
+fixed_effects <- fixef(m2)$cond  # Extract fixed effects
+population_intercept <- fixed_effects["(Intercept)"]  # Intercept
+population_slope <- fixed_effects["forest."]          # Slope for forest cover
+y_hat_pop <- exp(population_intercept + population_slope * newForest)  # Population-level predictions
+
+# Add the black dashed line for the population-level fit
+lines(newForest, y_hat_pop, lwd = 2, col = "black", lty = 2)
+
+# Add a legend
+legend("topright",
+       legend = c(levels(dat$method), "Population-level Fit"),
+       col = c(method_colors, "black"),
+       lty = c(rep(1, length(levels(dat$method))), 2),  # Solid lines for methods, dashed for population-level
+       lwd = 2)
+
