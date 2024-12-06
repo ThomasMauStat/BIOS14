@@ -1,0 +1,294 @@
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# Load the dataset
+data = read.table("Midterm/exam2022_part2-1.txt", header=T)
+View(data)
+
+# Add calculated horn average
+data$horn_avg <- (data$hornL + data$hornR) / 2
+
+# Scatterplot for Age vs. Body Mass
+ggplot(data, aes(x = age, y = mass, color = sex)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  labs(
+    title = "Age vs. Body Mass",
+    x = "Age (Years)",
+    y = "Body Mass (kg)",
+    color = "Sex"
+  )
+
+# Scatterplot for Age vs. Horn Length
+ggplot(data, aes(x = age, y = horn_avg, color = sex)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  labs(
+    title = "Age vs. Horn Length",
+    x = "Age (Years)",
+    y = "Horn Length (mm)",
+    color = "Sex"
+  )
+
+
+nokids_data <- data %>% filter(age > 0)
+# 1. Visualization: Horn Length by Density and Sex (using nokids_data)
+ggplot(nokids_data, aes(x = density, y = horn_avg, fill = sex)) +
+  geom_boxplot() +
+  theme_classic() +
+  labs(title = "Horn Length by Density and Sex (Excluding 0 Years)", x = "Density", y = "Horn Length (mm)")
+
+# 2. Visualization: Body Mass by Density and Sex (using nokids_data)
+ggplot(nokids_data, aes(x = density, y = mass, fill = sex)) +
+  geom_boxplot() +
+  theme_classic() +
+  labs(title = "Body Mass by Density and Sex (Excluding 0 Years)", x = "Density", y = "Body Mass (kg)")
+
+# Ensure nokids_data is in the correct format
+nokids_data$density <- as.factor(nokids_data$density)
+nokids_data$sex <- as.factor(nokids_data$sex)
+
+#ANOVA for Horn Length
+anova_horn <- aov(horn_avg ~ density * sex, data = nokids_data)
+summary(anova_horn)
+
+#Subset data for males only
+male_data <- nokids_data %>% filter(sex == "M")
+
+#Subset data for females only
+female_data <- nokids_data %>% filter(sex == "F")
+
+#Perform one-way ANOVA for horn length by density in males
+anova_male <- aov(horn_avg ~ density, data = male_data)
+summary(anova_male)
+
+
+#Perform one-way ANOVA for horn length by density in females
+anova_female <- aov(horn_avg ~ density, data = female_data)
+summary(anova_female)
+
+#horn means for males
+male_horn_means <- male_data %>%
+  group_by(density) %>%
+  summarise(mean_horn_length = mean(horn_avg, na.rm = TRUE))
+print(male_horn_means)
+
+#horn means for females
+female_horn_means <- female_data %>%
+  group_by(density) %>%
+  summarise(mean_horn_length = mean(horn_avg, na.rm = TRUE))
+print(female_horn_means)
+
+#ANOVA for Body Mass
+anova_mass <- aov(mass ~ density * sex, data = nokids_data)
+summary(anova_mass)
+
+#Perform one-way ANOVA for body mass by density in males
+anova_male_mass <- aov(mass ~ density, data = male_mass_data)
+summary(anova_male_mass)
+
+#Perform one-way ANOVA for body mass by density in females
+anova_female_mass <- aov(mass ~ density, data = female_mass_data)
+summary(anova_female_mass)
+
+#how does density chnage the growth rate of horn and bodymass age 0-3 
+
+# Filter data for ages 0 to 3
+filtered_data <- data %>% filter(age >= 0 & age <= 3)
+
+# Separate data by sex and density
+male_high_density <- filtered_data %>% filter(sex == "M" & density == "high")
+male_low_density <- filtered_data %>% filter(sex == "M" & density == "low")
+female_high_density <- filtered_data %>% filter(sex == "F" & density == "high")
+female_low_density <- filtered_data %>% filter(sex == "F" & density == "low")
+
+# Fit linear models for each group
+male_high_model <- lm(horn_avg ~ age, data = male_high_density)
+male_low_model <- lm(horn_avg ~ age, data = male_low_density)
+female_high_model <- lm(horn_avg ~ age, data = female_high_density)
+female_low_model <- lm(horn_avg ~ age, data = female_low_density)
+
+# Regression summaries
+summary(male_high_model)
+summary(male_low_model)
+summary(female_high_model)
+summary(female_low_model)
+
+# Prepare regression lines for visualization
+male_high_density$predicted <- predict(male_high_model)
+male_low_density$predicted <- predict(male_low_model)
+female_high_density$predicted <- predict(female_high_model)
+female_low_density$predicted <- predict(female_low_model)
+
+# Combine all data for plotting (horn)
+combined_data <- rbind(
+  male_high_density %>% mutate(group = "Male High Density"),
+  male_low_density %>% mutate(group = "Male Low Density"),
+  female_high_density %>% mutate(group = "Female High Density"),
+  female_low_density %>% mutate(group = "Female Low Density")
+)
+
+# Plot scatter with regression lines
+ggplot(combined_data, aes(x = age, y = horn_avg, color = group)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+  labs(title = "Horn Length by Age (0-3) with Regression Lines (High vs Low Density)",
+       x = "Age (year)", y = "Horn Length (mm)") +
+  theme_classic()
+
+# Statistical comparisons
+# Compare slopes
+male_high_slope <- coef(male_high_model)["age"]
+male_low_slope <- coef(male_low_model)["age"]
+female_high_slope <- coef(female_high_model)["age"]
+female_low_slope <- coef(female_low_model)["age"]
+
+list(
+  Male_High_Density_Slope = male_high_slope,
+  Male_Low_Density_Slope = male_low_slope,
+  Female_High_Density_Slope = female_high_slope,
+  Female_Low_Density_Slope = female_low_slope,
+  Slope_Difference_Male = abs(male_high_slope - male_low_slope),
+  Slope_Difference_Female = abs(female_high_slope - female_low_slope)
+)
+# Fit a single linear model for horn length with interactions
+horn_slope_model <- lm(horn_avg ~ age * sex * density, data = filtered_data)
+
+# Perform ANOVA to check interactions
+anova_horn <- anova(horn_slope_model)
+print(anova_horn)
+
+# Estimate pairwise differences in slopes
+slope_comparison <- emtrends(horn_slope_model, pairwise ~ sex * density, var = "age")
+
+# Print the pairwise slope comparison results
+print(slope_comparison)
+
+# Visualize regression lines for horn length
+ggplot(filtered_data, aes(x = age, y = horn_avg, color = sex, linetype = density)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Horn Growth by Age, Sex, and Density (0-3 years)",
+       x = "Age (Years)", y = "Horn Length (mm)") +
+  theme_classic()
+
+# Fit linear models for  mass in each group
+male_high_model_mass <- lm(mass ~ age, data = male_high_density)
+male_low_model_mass <- lm(mass ~ age, data = male_low_density)
+female_high_model_mass <- lm(mass ~ age, data = female_high_density)
+female_low_model_mass <- lm(mass ~ age, data = female_low_density)
+
+# Regression summaries
+summary(male_high_model_mass)
+summary(male_low_model_mass)
+summary(female_high_model_mass)
+summary(female_low_model_mass)
+
+# Prepare regression lines for visualization
+male_high_density$predicted <- predict(male_high_model_mass)
+male_low_density$predicted <- predict(male_low_model_mass)
+female_high_density$predicted <- predict(female_high_model_mass)
+female_low_density$predicted <- predict(female_low_model_mass)
+
+# Combine all data for plotting
+combined_data <- rbind(
+  male_high_density %>% mutate(group = "Male High Density"),
+  male_low_density %>% mutate(group = "Male Low Density"),
+  female_high_density %>% mutate(group = "Female High Density"),
+  female_low_density %>% mutate(group = "Female Low Density")
+)
+
+# Plot scatter with regression lines
+ggplot(combined_data, aes(x = age, y = mass, color = group)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+  labs(title = "Mass by Age (0-3) with Regression Lines (High vs Low Density)",
+       x = "Age (Year)", y = "Mass (kg)") +
+  theme_classic()
+
+# Statistical comparisons
+# Compare slopes
+male_high_slope_mass <- coef(male_high_model_mass)["age"]
+male_low_slope_mass <- coef(male_low_model_mass)["age"]
+female_high_slope_mass <- coef(female_high_model_mass)["age"]
+female_low_slope_mass <- coef(female_low_model_mass)["age"]
+
+list(
+  Male_High_Density_Slope_Mass = male_high_slope_mass,
+  Male_Low_Density_Slope_Mass = male_low_slope_mass,
+  Female_High_Density_Slope_Mass = female_high_slope_mass,
+  Female_Low_Density_Slope_Mass = female_low_slope_mass,
+  Slope_Difference_Male_Mass = abs(male_high_slope_mass - male_low_slope_mass),
+  Slope_Difference_Female_Mass = abs(female_high_slope_mass - female_low_slope_mass)
+)
+
+
+
+
+
+# Fit linear models for each group
+male_high_model_mass <- lm(mass ~ age, data = male_high_density)
+male_low_model_mass <- lm(mass ~ age, data = male_low_density)
+female_high_model_mass <- lm(mass ~ age, data = female_high_density)
+female_low_model_mass <- lm(mass ~ age, data = female_low_density)
+
+# Regression summaries
+summary(male_high_model_mass)
+summary(male_low_model_mass)
+summary(female_high_model_mass)
+summary(female_low_model_mass)
+
+# Prepare regression lines for visualization
+male_high_density$predicted <- predict(male_high_model_mass)
+male_low_density$predicted <- predict(male_low_model_mass)
+female_high_density$predicted <- predict(female_high_model_mass)
+female_low_density$predicted <- predict(female_low_model_mass)
+
+# Combine all data for plotting
+combined_data <- rbind(
+  male_high_density %>% mutate(group = "Male High Density"),
+  male_low_density %>% mutate(group = "Male Low Density"),
+  female_high_density %>% mutate(group = "Female High Density"),
+  female_low_density %>% mutate(group = "Female Low Density")
+)
+
+# Plot scatter with regression lines
+ggplot(combined_data, aes(x = age, y = mass, color = group)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+  labs(title = "Mass by Age (0-3) with Regression Lines (High vs Low Density)",
+       x = "Age", y = "Mass") +
+  theme_minimal()
+
+# Statistical comparisons
+# Compare slopes
+male_high_slope_mass <- coef(male_high_model_mass)["age"]
+male_low_slope_mass <- coef(male_low_model_mass)["age"]
+female_high_slope_mass <- coef(female_high_model_mass)["age"]
+female_low_slope_mass <- coef(female_low_model_mass)["age"]
+
+list(
+  Male_High_Density_Slope_Mass = male_high_slope_mass,
+  Male_Low_Density_Slope_Mass = male_low_slope_mass,
+  Female_High_Density_Slope_Mass = female_high_slope_mass,
+  Female_Low_Density_Slope_Mass = female_low_slope_mass,
+  Slope_Difference_Male_Mass = abs(male_high_slope_mass - male_low_slope_mass),
+  Slope_Difference_Female_Mass = abs(female_high_slope_mass - female_low_slope_mass)
+)
+
+# Fit a single linear model for mass with interactions
+mass_slope_model <- lm(mass ~ age * sex * density, data = filtered_data)
+
+# Perform ANOVA to check interactions
+anova_mass <- anova(mass_slope_model)
+print(anova_mass)
+
+# Estimate pairwise differences in slopes for mass
+mass_slope_comparison <- emtrends(mass_slope_model, pairwise ~ sex * density, var = "age")
+
+# Print the pairwise slope comparison results
+print(mass_slope_comparison)
+
