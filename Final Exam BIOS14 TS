@@ -1,0 +1,271 @@
+#Load librarys
+{
+  if (!require(dplyr)) install.packages("dplyr")
+  if (!require(ggplot2)) install.packages("ggplot2")
+  if (!require(psych)) install.packages("psych")
+  if (!require(ggsignif)) install.packages("ggsignif")
+  if (!require(pROC)) install.packages("pROC")
+  if (!require(viridis)) install.packages("viridis")
+  if (!require(car)) install.packages("car")
+  
+  library(dplyr)
+  library(ggplot2)
+  library(psych)
+  library(ggsignif)
+  library(pROC)
+  library(viridis)
+  library(car)
+}
+
+#Get data
+{male_CS <- read.csv("Final exam/male_CS.csv")
+male_CV <- read.csv("Final exam/male_CV.csv")
+female_CS <- read.csv("Final exam/female_CS.csv")
+female_CV <- read.csv("Final exam/female_CV.csv")
+
+#Combine
+all_data <- bind_rows(male_CS, male_CV, female_CS, female_CV)
+}
+#pairs.panels(all_data)
+#pairs.panels(male_CS)
+#pairs.panels(male_CV)
+#pairs.panels(female_CS)
+#pairs.panels(female_CV)
+
+#Filter relevant columns
+variables <- c("lifespan", "cop", "tbl", "abl", "thorl", "thorw", "fwl", "hwl", "sex", "sp", "year")
+filtered_data <- all_data %>% select(all_of(variables))
+
+#Define units for each variable
+variable_units <- list(
+  lifespan = "Days",
+  tbl = "Total Body Length (mm)",
+  abl = "Abdominal Length (mm)",
+  thorl = "Thorax Length (mm)",
+  thorw = "Thorax Width (mm)",
+  fwl = "Forewing Length (mm)",
+  hwl = "Hind Wing Length (mm)"
+)
+
+#Calculate mean
+mean_results <- filtered_data %>%
+  group_by(sex, sp) %>%
+  summarise(across(c(lifespan, cop, tbl, abl, thorl, thorw, fwl, hwl), mean, na.rm = TRUE), .groups = "drop")
+
+#mean results
+print(mean_results)
+
+#fisher
+
+#Boxplots for each variable grouped by sex and species
+boxplot_variables <- c("lifespan", "tbl", "abl", "thorl", "thorw", "fwl", "hwl")
+for (var in boxplot_variables) {
+  print(
+    ggplot(all_data, aes(x = interaction(sex, sp), y = .data[[var]])) +
+      geom_boxplot() +
+      labs(
+        title = paste("Boxplot of", var, "by Sex and Species"),
+        x = "Sex and Species",
+        y = variable_units[[var]] 
+      ) +
+      theme_classic() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  )
+}
+
+#filter data for females only
+female_data <- filtered_data %>% filter(sex == "Female")
+
+#Function to calculate outliers and filter data
+remove_outliers <- function(data, variable) {
+  data %>%
+    mutate(
+      Q1 = quantile(.data[[variable]], 0.25, na.rm = TRUE),
+      Q3 = quantile(.data[[variable]], 0.75, na.rm = TRUE),
+      IQR = Q3 - Q1,
+      lower_bound = Q1 - 1.5 * IQR,
+      upper_bound = Q3 + 1.5 * IQR
+    ) %>%
+    filter(.data[[variable]] >= lower_bound & .data[[variable]] <= upper_bound) %>%
+    select(-Q1, -Q3, -IQR, -lower_bound, -upper_bound)
+}
+
+#Remove outliers for hwl, fwl, and tbl
+female_data_cleaned <- female_data %>%
+  group_by(sp) %>%
+  remove_outliers("hwl") %>%
+  remove_outliers("tbl") %>%
+  remove_outliers("fwl") %>%
+  ungroup()
+#Check data
+cat("Original Female Data Rows:", nrow(female_data), "\n")
+cat("Cleaned Female Data Rows:", nrow(female_data_cleaned), "\n")
+
+#GLM with interaction between hwl, tbl and fwl with species
+logistic_model <- glm(cop ~ hwl * sp + sp * tbl + fwl * sp, data = female_data_cleaned, family = binomial(link = "logit"))
+summary(logistic_model)
+
+
+#View(female_data_cleaned)
+#Boxplot of hwl by species (cleaned data)
+ggplot(female_data_cleaned, aes(x = sp, y = hwl)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of hwl by Species (Outliers Removed)", x = "Species", y = "Hind Wing Length (mm)")
+
+
+#Variables to analyze
+variables <- c("hwl", "tbl", "fwl")
+
+#Filter data for both CS and CV species
+female_data_cleaned_CS_CV <- female_data_cleaned %>%
+  filter(sp %in% c("CS", "CV"))
+
+#Perform ANOVA for each species and variable
+for (var in variables) {
+  #Perform ANOVA within each species (CS and CV) for copulation groups
+  anova_results_CS <- aov(as.formula(paste(var, "~ cop")), data = female_data_cleaned %>% filter(sp == "CS"))
+  anova_results_CV <- aov(as.formula(paste(var, "~ cop")), data = female_data_cleaned %>% filter(sp == "CV"))
+  
+  p_val_CS <- summary(anova_results_CS)[[1]]$`Pr(>F)`[1]
+  p_val_CV <- summary(anova_results_CV)[[1]]$`Pr(>F)`[1]
+  
+  significance_CS <- ifelse(p_val_CS < 0.001, "***", ifelse(p_val_CS < 0.01, "**", ifelse(p_val_CS < 0.05, "*", "")))
+  significance_CV <- ifelse(p_val_CV < 0.001, "***", ifelse(p_val_CV < 0.01, "**", ifelse(p_val_CV < 0.05, "*", "")))
+  
+  #Display boxplot with ANOVA
+  print(
+    ggplot(female_data_cleaned_CS_CV, aes(x = interaction(cop, sp), y = .data[[var]], fill = factor(cop))) +
+      geom_boxplot() +
+      labs(
+        title = NULL,
+        x = "Species",
+        y = variable_units[[var]],  # Add the appropriate units from the list
+        fill = "Copulation"  # Label the fill as "Copulation"
+      ) +
+      scale_x_discrete(labels = c("CS", "CS", "CV", "CV")) +  # Label x axis with "CS" and "CV"
+      scale_fill_viridis(option = "D", discrete = TRUE, labels = c("No", "Yes")) +
+      annotate("text", x = 1.5, y = max(female_data_cleaned_CS_CV[[var]], na.rm = TRUE) * 1.05,
+               label = significance_CS, size = 6, color = "black") +
+      annotate("text", x = 3.5, y = max(female_data_cleaned_CS_CV[[var]], na.rm = TRUE) * 1.05,
+               label = significance_CV, size = 6, color = "black") +
+      theme_classic() +
+      theme(
+        axis.text.x = element_text(size = 14),  # Increase x-axis text size
+        axis.text.y = element_text(size = 14),  # Increase y-axis text size
+        axis.title.x = element_text(size = 16), # Increase x-axis title size
+        axis.title.y = element_text(size = 16),
+        legend.position = c(0.10, 0.85),  # Move both legends to the bottom-right corner
+        legend.text = element_text(size = 12),  # Increase legend text size
+        legend.title = element_text(size = 14)  # Increase legend title size  # Increase y-axis title size
+      )
+  )
+}
+
+
+{#Filter data for CS and CV
+female_data_cleaned_CS <- female_data_cleaned %>% filter(sp == "CS")
+female_data_cleaned_CV <- female_data_cleaned %>% filter(sp == "CV")
+}
+
+#GLM model for CV
+glm_CV <- glm(cop ~ hwl + tbl, family = binomial(link = "logit"), data = female_data_cleaned_CV)
+summary(glm_CV)
+
+#check multicollinearity between these predictors interaction term  hwl * tbl give high multicollinearity
+vif(glm_CV) 
+
+{female_data_cleaned_CV$predicted_prob_CV <- predict(glm_CV, type = "response")
+
+#AUC for CV
+roc_CV <- roc(female_data_cleaned_CV$cop, female_data_cleaned_CV$predicted_prob_CV)
+auc_CV <- auc(roc_CV)
+
+ggplot(female_data_cleaned_CV, aes(x = hwl, y = predicted_prob_CV, color = tbl)) +
+  geom_point(aes(shape = factor(cop)), alpha = 0.7, size = 2) +
+  scale_color_viridis(option = "D") + #Colorblind friendly
+  scale_shape_manual(values = c(4, 15), labels = c("No", "Yes"))  +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE, color = "black") +
+  labs(
+    #title = paste("Effect of hwl and tbl on Copulation Probability for Species: CV\nSlope of hwl:", 
+                  #round(coef(glm_CV)["hwl"], 3), 
+                  #"\nAUC:", round(auc_CV, 3)),
+    x = "Hind Wing Length (mm)",
+    y = "Predicted Probability of Copulation",
+    color = "Total Body Length (mm)",
+    shape = "Copulation"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 12),  # Increase x-axis text size
+    axis.text.y = element_text(size = 12),  # Increase y-axis text size
+    axis.title.x = element_text(size = 14), # Increase x-axis title size
+    axis.title.y = element_text(size = 14), # Increase y-axis title size
+    legend.position = c(0.18, 0.75),  # Move both legends to the bottom-right corner
+    legend.text = element_text(size = 12),  # Increase legend text size
+    legend.title = element_text(size = 14)  # Increase legend title size  # Increase y-axis title size
+  )
+}
+
+#GLM model for CS
+glm_CS <- glm(cop ~ hwl + tbl, family = binomial(link = "logit"), data = female_data_cleaned_CS)
+summary(glm_CS)
+
+#check multicollinearity between these predictors interaction term  hwl * tbl give high multicollinearity
+vif(glm_CS) 
+
+{female_data_cleaned_CS$predicted_prob_CS <- predict(glm_CS, type = "response")
+
+#AUC for CS
+roc_CS <- roc(female_data_cleaned_CS$cop, female_data_cleaned_CS$predicted_prob_CS)
+auc_CS <- auc(roc_CS)
+
+min_y <- min(female_data_cleaned_CV$predicted_prob_CV, na.rm = TRUE)
+max_y <- max(female_data_cleaned_CV$predicted_prob_CV, na.rm = TRUE)
+
+ggplot(female_data_cleaned_CS, aes(x = hwl, y = predicted_prob_CS, color = tbl)) +
+  geom_point(aes(shape = factor(cop)), alpha = 0.7, size = 2) +
+  scale_color_viridis(option = "D") + #Colorblind friendly
+  scale_shape_manual(values = c(4, 15), labels = c("No", "Yes"))  +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE, color = "black") +
+  labs(
+    #title = paste("Effect of hwl and tbl on Copulation Probability for Species: CS\nSlope of hwl:", 
+                  #round(coef(glm_CS)["hwl"], 3), 
+                  #"\nAUC:", round(auc_CS, 3)),
+    x = "Hind Wing Length (mm)",
+    y = "Predicted Probability of Copulation",
+    color = "Total Body Length (mm)",
+    shape = "Copulation"
+  ) +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(size = 12),  # Increase x-axis text size
+    axis.text.y = element_text(size = 12),  # Increase y-axis text size
+    axis.title.x = element_text(size = 14), # Increase x-axis title size
+    axis.title.y = element_text(size = 14), # Increase y-axis title size
+    legend.position = c(0.18, 0.75),  # Move both legends to the bottom-right corner
+    legend.text = element_text(size = 12),  # Increase legend text size
+    legend.title = element_text(size = 14)  # Increase legend title size  # Increase y-axis title size, # Increase y-axis title size
+  ) +
+  coord_cartesian(ylim = c(min_y, max_y))
+  }
+
+#AUC plot CV CS
+{plot(roc_CV, 
+     col = "blue", 
+     lwd = 2, 
+     legacy.axes = TRUE, 
+     xlim = c(1, -0.2),   # Reversed x-axis
+     ylim = c(0, 1),      # y-axis from 0 to 1
+     main = NULL, 
+     xlab = "1 - Specificity", 
+     ylab = "Sensitivity")
+
+lines(roc_CS$specificities, roc_CS$sensitivities, col = "red", lwd = 2)
+
+legend("bottomright", 
+       legend = c(paste("CV Species (AUC:", round(auc_CV, 3), ")"), 
+                  paste("CS Species (AUC:", round(auc_CS, 3), ")")),
+       col = c("blue", "red"), 
+       lwd = 2)
+}
+
